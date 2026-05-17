@@ -6,13 +6,15 @@ namespace WebviewCore;
 static class ImageLoader
 {
     private static readonly Dictionary<string, SKBitmap> Cache = new();
-    private static readonly HttpClient Client = new(new HttpClientHandler
+    private static readonly HttpClient Client = new(new SocketsHttpHandler
     {
         AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
         AllowAutoRedirect = true,
-    });
+        MaxAutomaticRedirections = 10,
+    })
+    { Timeout = TimeSpan.FromSeconds(10) };
 
-    static ImageLoader() { Client.DefaultRequestHeaders.UserAgent.ParseAdd("WebViewCore/1.0"); Client.Timeout = TimeSpan.FromSeconds(10); }
+    static ImageLoader() { Client.DefaultRequestHeaders.UserAgent.ParseAdd("WebViewCore/1.0"); }
 
     public static SKBitmap? GetCached(string url) { lock (Cache) return Cache.TryGetValue(url, out var i) ? i : null; }
 

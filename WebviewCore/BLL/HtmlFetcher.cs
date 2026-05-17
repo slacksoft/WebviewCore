@@ -7,11 +7,20 @@ namespace WebviewCore;
 
 static class HtmlFetcher
 {
+    private static readonly HttpClient Client = new(new SocketsHttpHandler
+    {
+        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+        AllowAutoRedirect = true,
+        MaxAutomaticRedirections = 10,
+    })
+    { Timeout = TimeSpan.FromSeconds(15) };
+
     public static string BaseUrl { get; private set; } = "";
 
     static HtmlFetcher()
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        Client.DefaultRequestHeaders.UserAgent.ParseAdd("WebViewCore/1.0");
     }
 
     public static async Task<string> FetchAsync(string url)
@@ -24,16 +33,9 @@ static class HtmlFetcher
             return DecodeHtml(bytes, null);
         }
 
-        using var client = new HttpClient(new HttpClientHandler
-        {
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
-            AllowAutoRedirect = true,
-        });
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("WebViewCore/1.0");
-        client.Timeout = TimeSpan.FromSeconds(15);
-        var resp = await client.GetAsync(url);
+        var resp = await Client.GetAsync(url).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
-        var data = await resp.Content.ReadAsByteArrayAsync();
+        var data = await resp.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
         return DecodeHtml(data, resp.Content.Headers.ContentType);
     }
 
