@@ -5,6 +5,15 @@ using System.Text.RegularExpressions;
 
 namespace WebviewCore;
 
+public class FetchResult
+{
+    public string? Html { get; set; }
+    public bool IsDownload { get; set; }
+    public byte[]? Data { get; set; }
+    public string? DownloadFilename { get; set; }
+    public string? ContentType { get; set; }
+}
+
 static class HtmlFetcher
 {
     private static readonly HttpClient Client = new(new SocketsHttpHandler
@@ -25,18 +34,66 @@ static class HtmlFetcher
 
     public static async Task<string> FetchAsync(string url)
     {
+        var result = await FetchResultAsync(url);
+        return result.Html ?? "";
+    }
+
+    public static async Task<FetchResult> FetchResultAsync(string url)
+    {
         BaseUrl = url;
         if (url.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
         {
             var path = Uri.UnescapeDataString(url[8..].TrimStart('/'));
             var bytes = await File.ReadAllBytesAsync(path);
-            return DecodeHtml(bytes, null);
+            return new FetchResult { Html = DecodeHtml(bytes, null) };
         }
 
-        var resp = await Client.GetAsync(url).ConfigureAwait(false);
+        var resp = await Client.GetAsync(url, HttpCompletionOption.ResponseContentRead).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
         var data = await resp.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-        return DecodeHtml(data, resp.Content.Headers.ContentType);
+
+        // Check for download
+        var contentDisposition = resp.Content.Headers.ContentDisposition;
+        if (contentDisposition?.DispositionType?.Equals("attachment", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            var filename = contentDisposition.FileNameStar ?? contentDisposition.FileName ?? "download";
+            filename = filename.Trim('"');
+            return new FetchResult
+            {
+                IsDownload = true,
+                Data = data,
+                DownloadFilename = filename,
+                ContentType = resp.Content.Headers.ContentType?.MediaType,
+            };
+        }
+
+        var contentType = resp.Content.Headers.ContentType?.MediaType?.ToLowerInvariant();
+        if (contentType != null && contentType != "text/html" && contentType != "text/plain" && !contentType.StartsWith("text/"))
+        {
+            var filename = ExtractFilename(url);
+            return new FetchResult
+            {
+                IsDownload = true,
+                Data = data,
+                DownloadFilename = filename,
+                ContentType = contentType,
+            };
+        }
+
+        return new FetchResult { Html = DecodeHtml(data, resp.Content.Headers.ContentType) };
+    }
+
+    private static string ExtractFilename(string url)
+    {
+        try
+        {
+            var uri = new Uri(url);
+            var path = uri.AbsolutePath;
+            var name = Path.GetFileName(path);
+            if (!string.IsNullOrEmpty(name)) return name;
+            return "download";
+        }
+        catch { return "download"; }
     }
 
     internal static string DecodeHtml(byte[] data, MediaTypeHeaderValue? contentType)

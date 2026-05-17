@@ -13,6 +13,9 @@ public class JsEngine : IDisposable
     public List<string> ConsoleLog { get; } = new();
     public event Action<string>? MessageLogged;
     public event Action? DomChanged;
+    public event Action<string>? OpenRequested;
+    public event Action? CloseRequested;
+    public event Action? PrintRequested;
 
     public void Initialize(IDocument doc)
     {
@@ -628,19 +631,19 @@ __g.HTMLDocument = function() { return __g.document; };
 
         try
         {
-            _engine!.AddHostObject("open", new Func<string, object>(url =>
+            _engine!.AddHostObject("open", new Func<string, string>(url =>
             {
-                var w = new WindowHost(url, _docHost!, _locHost!);
-                return w;
+                OpenRequested?.Invoke(url);
+                return "opened";
             }));
         }
         catch (Exception ex) { Log($"open FAIL: {ex.Message}"); }
 
-        try { _engine!.AddHostObject("close", new Action(() => { })); } catch (Exception ex) { Log($"close FAIL: {ex.Message}"); }
+        try { _engine!.AddHostObject("close", new Action(() => { CloseRequested?.Invoke(); })); } catch (Exception ex) { Log($"close FAIL: {ex.Message}"); }
         try { _engine!.AddHostObject("focus", new Action(() => { })); } catch (Exception ex) { Log($"focus FAIL: {ex.Message}"); }
         try { _engine!.AddHostObject("blur", new Action(() => { })); } catch (Exception ex) { Log($"blur FAIL: {ex.Message}"); }
         try { _engine!.AddHostObject("stop", new Action(() => { })); } catch (Exception ex) { Log($"stop FAIL: {ex.Message}"); }
-        try { _engine!.AddHostObject("print", new Action(() => { })); } catch (Exception ex) { Log($"print FAIL: {ex.Message}"); }
+        try { _engine!.AddHostObject("print", new Action(() => { PrintRequested?.Invoke(); })); } catch (Exception ex) { Log($"print FAIL: {ex.Message}"); }
         try { _engine!.AddHostObject("postMessage", new Action<object, string>((msg, target) => { })); } catch (Exception ex) { Log($"postMsg FAIL: {ex.Message}"); }
 
         try { _engine!.AddHostObject("matchMedia", new Func<string, object>(q => new MatchMediaHost(q))); } catch (Exception ex) { Log($"matchMedia FAIL: {ex.Message}"); }

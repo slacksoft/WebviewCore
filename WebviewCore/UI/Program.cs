@@ -12,7 +12,7 @@ namespace WebviewCore
                 return CoreSelfTest.RunAsync(args).GetAwaiter().GetResult();
 
             ApplicationConfiguration.Initialize();
-            Application.Run(new Form1());
+            Application.Run(new MainForm());
             return 0;
         }
     }

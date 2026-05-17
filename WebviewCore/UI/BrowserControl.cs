@@ -7,8 +7,14 @@ using SkiaSharp;
 
 namespace WebviewCore;
 
-public partial class Form1 : Form
+public class BrowserControl : UserControl
 {
+    public event EventHandler<string>? TitleChanged;
+    public event EventHandler<string>? NewTabRequested;
+    public event EventHandler? CloseRequested;
+    public event EventHandler? PrintRequested;
+    public event EventHandler<FetchResult>? DownloadRequested;
+
     private readonly record struct TextHit(LayoutBox Box, int Offset);
 
     private LayoutBox? _layout;
@@ -19,7 +25,7 @@ public partial class Form1 : Form
     private float _scrollY;
     private LayoutBox? _focusedInput;
     private readonly Stack<string> _history = new();
-    private const string DefaultUrl = "about:test";
+    private const string DefaultUrl = "about:blank";
     private readonly Dictionary<IElement, (string val, bool chk)> _formState = new();
     private bool _isSelectingText;
     private bool _suppressNextClick;
@@ -32,23 +38,20 @@ public partial class Form1 : Form
 
     private readonly TextBox _urlBox;
     private readonly Button _backBtn, _goBtn;
-    private readonly TabControl _tabs;
+    private readonly TabControl _viewTabs;
     private readonly Panel _renderPanel;
     private readonly VScrollBar _scrollBar;
     private readonly TextBox _consoleBox, _sourceBox;
     private readonly TextBox _consoleInput;
 
-    public Form1()
+    public BrowserControl()
     {
-        Text = "WebviewCore";
         _backBtn = new Button { Text = "←", Location = new Point(8, 7), Size = new Size(28, 28), Enabled = false };
         _backBtn.Click += (_, _) => GoBack();
-        _urlBox = new TextBox { Text = DefaultUrl, Location = new Point(_backBtn.Right + 4, 8), Size = new Size(ClientSize.Width - _backBtn.Right - 96, 26), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, Font = new Font("Segoe UI", 10) };
-        _goBtn = new Button { Text = "Go", Location = new Point(ClientSize.Width - 88, 7), Size = new Size(48, 28), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+        _urlBox = new TextBox { Text = DefaultUrl, Location = new Point(_backBtn.Right + 4, 8), Size = new Size(ClientSize.Width - _backBtn.Right - 56, 26), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, Font = new Font("Segoe UI", 10) };
+        _goBtn = new Button { Text = "Go", Location = new Point(ClientSize.Width - 48, 7), Size = new Size(48, 28), Anchor = AnchorStyles.Top | AnchorStyles.Right };
         _goBtn.Click += (_, _) => Navigate(_urlBox.Text.Trim());
         _urlBox.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) { Navigate(_urlBox.Text.Trim()); e.SuppressKeyPress = true; } };
-        var _testBtn = new Button { Text = "Test", Location = new Point(ClientSize.Width - 36, 7), Size = new Size(36, 28), Anchor = AnchorStyles.Top | AnchorStyles.Right, Font = new Font("Segoe UI", 8) };
-        _testBtn.Click += (_, _) => Navigate("about:test");
         _scrollBar = new VScrollBar { Dock = DockStyle.Right, Visible = false, SmallChange = 20, LargeChange = 80 };
         _scrollBar.ValueChanged += (_, _) => { _scrollY = _scrollBar.Value; _renderPanel!.Invalidate(); };
         _renderPanel = new DoubleBufferedPanel { BackColor = Color.White, Dock = DockStyle.Fill };
@@ -59,6 +62,7 @@ public partial class Form1 : Form
         _renderPanel.MouseUp += RenderPanel_MouseUp!;
         _renderPanel.KeyPress += RenderPanel_KeyPress!;
         _renderPanel.KeyDown += RenderPanel_KeyDown!;
+        _renderPanel.MouseWheel += RenderPanel_MouseWheel!;
         var rc = new Panel { Dock = DockStyle.Fill }; rc.Controls.Add(_renderPanel); rc.Controls.Add(_scrollBar);
         _consoleBox = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false, Dock = DockStyle.Fill, Font = new Font("Consolas", 9), BackColor = Color.FromArgb(30, 30, 30), ForeColor = Color.FromArgb(0, 200, 0) };
         _consoleInput = new TextBox { Dock = DockStyle.Bottom, Height = 24, Font = new Font("Consolas", 9), BackColor = Color.FromArgb(20, 20, 20), ForeColor = Color.FromArgb(0, 200, 0), BorderStyle = BorderStyle.FixedSingle };
@@ -67,21 +71,25 @@ public partial class Form1 : Form
         consolePanel.Controls.Add(_consoleBox);
         consolePanel.Controls.Add(_consoleInput);
         _sourceBox = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false, Dock = DockStyle.Fill, Font = new Font("Consolas", 9), BackColor = Color.White, ForeColor = Color.Black };
-        _tabs = new TabControl { Location = new Point(0, _urlBox.Bottom + 4), Size = new Size(ClientSize.Width, ClientSize.Height - _urlBox.Bottom - 4), Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right };
-        _tabs.TabPages.Add("Render", "Render"); _tabs.TabPages.Add("Console", "Console"); _tabs.TabPages.Add("Source", "Source");
-        _tabs.TabPages["Render"]!.Controls.Add(rc); _tabs.TabPages["Console"]!.Controls.Add(consolePanel); _tabs.TabPages["Source"]!.Controls.Add(_sourceBox);
-        Controls.Add(_backBtn); Controls.Add(_urlBox); Controls.Add(_goBtn); Controls.Add(_testBtn); Controls.Add(_tabs);
-        DoubleBuffered = true; ClientSize = new Size(960, 720); BackColor = Color.White;
-        Resize += (_, _) => RelayoutOrResize(); Shown += (_, _) => RelayoutOrResize();
+        _viewTabs = new TabControl { Location = new Point(0, _urlBox.Bottom + 4), Size = new Size(ClientSize.Width, ClientSize.Height - _urlBox.Bottom - 4), Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right };
+        _viewTabs.TabPages.Add("Render", "Render"); _viewTabs.TabPages.Add("Console", "Console"); _viewTabs.TabPages.Add("Source", "Source");
+        _viewTabs.TabPages["Render"]!.Controls.Add(rc); _viewTabs.TabPages["Console"]!.Controls.Add(consolePanel); _viewTabs.TabPages["Source"]!.Controls.Add(_sourceBox);
+        Controls.Add(_backBtn); Controls.Add(_urlBox); Controls.Add(_goBtn); Controls.Add(_viewTabs);
+        DoubleBuffered = true; BackColor = Color.White;
+        Resize += (_, _) => RelayoutOrResize();
+        Load += (_, _) => RelayoutOrResize();
         _ = LoadPageAsync(DefaultUrl);
     }
+
+    public string CurrentUrl => _currentUrl;
+    public string Title { get; private set; } = "WebviewCore";
 
     private int RenderWidth => _renderPanel.ClientSize.Width > 16 ? _renderPanel.ClientSize.Width - 16 : 800;
     private int RenderHeight => _renderPanel.ClientSize.Height > 0 ? _renderPanel.ClientSize.Height : 600;
 
-    private void GoBack() { if (_history.Count == 0) return; _backBtn.Enabled = _history.Count > 0; _ = LoadPageAsync(_history.Pop()); }
+    public void GoBack() { if (_history.Count == 0) return; _backBtn.Enabled = _history.Count > 0; _ = LoadPageAsync(_history.Pop()); }
 
-    private void Navigate(string url)
+    public void Navigate(string url)
     {
         if (string.IsNullOrWhiteSpace(url)) return;
         if (!url.Contains("://")) { if (url.StartsWith("//")) url = "http:" + url; else if (url.StartsWith('/')) url = "file:///" + url; else url = "http://" + url; }
@@ -89,21 +97,27 @@ public partial class Form1 : Form
         _ = LoadPageAsync(url);
     }
 
-    private async Task LoadPageAsync(string url)
+    public async Task LoadPageAsync(string url)
     {
         _jsEngine?.Dispose(); _jsEngine = null; _currentUrl = url;
         try
         {
-            Text = "WebviewCore - Loading..."; _urlBox.Text = url; _tabs.SelectedIndex = 0;
+            Title = "WebviewCore - Loading..."; _urlBox.Text = url; _viewTabs.SelectedIndex = 0;
 
-            if (url == "about:test")
+            if (url == "about:blank" || url == "about:test")
             {
-                _rawHtml = TestPage.Html;
+                _rawHtml = url == "about:test" ? TestPage.Html : "<!DOCTYPE html><html><head><title>Blank</title></head><body></body></html>";
                 _sourceBox.Text = _rawHtml;
             }
             else
             {
-                _rawHtml = await HtmlFetcher.FetchAsync(url);
+                var result = await HtmlFetcher.FetchResultAsync(url);
+                if (result.IsDownload)
+                {
+                    DownloadRequested?.Invoke(this, result);
+                    return;
+                }
+                _rawHtml = result.Html ?? "";
                 _sourceBox.Text = _rawHtml;
             }
 
@@ -112,18 +126,21 @@ public partial class Form1 : Form
             _doc = await ctx.OpenAsync(req => req.Content(_rawHtml));
             _doc.DocumentElement?.SetAttribute("_base", HtmlFetcher.BaseUrl);
 
-            Text = "WebviewCore";
+            Title = "WebviewCore";
 
             _consoleBox.Clear(); _jsEngine = new JsEngine();
             _jsEngine.MessageLogged += msg => { if (_consoleBox.IsHandleCreated) BeginInvoke(() => { _consoleBox.AppendText(msg + "\r\n"); _consoleBox.SelectionStart = _consoleBox.TextLength; _consoleBox.ScrollToCaret(); }); };
             _jsEngine.DomChanged += () => _domChanged = true;
+            _jsEngine.OpenRequested += url2 => { if (IsHandleCreated) BeginInvoke(() => NewTabRequested?.Invoke(this, url2)); };
+            _jsEngine.CloseRequested += () => { if (IsHandleCreated) BeginInvoke(() => CloseRequested?.Invoke(this, EventArgs.Empty)); };
+            _jsEngine.PrintRequested += () => { if (IsHandleCreated) BeginInvoke(() => PrintRequested?.Invoke(this, EventArgs.Empty)); };
             try
             {
                 _jsEngine.Initialize(_doc);
             }
             catch (Exception ex)
             {
-                Text = "WebviewCore - JS Init Error";
+                Title = "WebviewCore - JS Init Error";
                 _layout = CreateErrorLayout($"JS Init Error: {ex.Message}\n{ex.StackTrace}");
                 _renderPanel.Invalidate();
                 return;
@@ -156,7 +173,7 @@ public partial class Form1 : Form
             }
 
             _sourceBox.Text = _doc.DocumentElement?.OuterHtml ?? _rawHtml;
-            Text = _doc.QuerySelector("title")?.TextContent?.Trim() ?? "WebviewCore";
+            Title = _doc.QuerySelector("title")?.TextContent?.Trim() ?? "WebviewCore";
 
             var styles = StyleComputer.BuildStyleMap(_doc);
 
@@ -168,10 +185,10 @@ public partial class Form1 : Form
             _renderPanel.Invalidate();
             _ = LoadImagesAsync(eng.PendingImages);
         }
-        catch (Exception ex) { Text = "WebviewCore - Error"; _layout = CreateErrorLayout($"Error: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace?.Split('\n').FirstOrDefault() ?? ""}"); _renderPanel.Invalidate(); }
+        catch (Exception ex) { Title = "WebviewCore - Error"; _layout = CreateErrorLayout($"Error: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace?.Split('\n').FirstOrDefault() ?? ""}"); _renderPanel.Invalidate(); }
+        finally { TitleChanged?.Invoke(this, Title); }
     }
 
-    // --- HTML5 element display defaults (used when GetComputedStyle unavailable) ---
     private static readonly Dictionary<string, string> DefaultDisplay = new(StringComparer.OrdinalIgnoreCase)
     {
         ["html"]="block",["body"]="block",["div"]="block",["p"]="block",
@@ -196,7 +213,6 @@ public partial class Form1 : Form
         ["style"]="none",["script"]="none",["head"]="none",["meta"]="none",["link"]="none",["base"]="none",["title"]="none",
     };
 
-    // --- New reliable style builder (no dependency on GetComputedStyle) ---
     private static BoxStyle MakeDefaultStyle(string? tag)
     {
         var bs = new BoxStyle();
@@ -206,7 +222,6 @@ public partial class Form1 : Form
             bs.DisplayBlock = disp is "block" or "inline-block" or "table" or "table-row" or "table-cell";
             bs.IsTable = disp == "table"; bs.IsTableRow = disp == "table-row"; bs.IsTableCell = disp == "table-cell";
         }
-        // Headings default font-size
         if (tag == "h1") { bs.FontSize = 24; bs.Bold = true; }
         else if (tag == "h2") { bs.FontSize = 20; bs.Bold = true; }
         else if (tag == "h3") { bs.FontSize = 16; bs.Bold = true; }
@@ -238,7 +253,6 @@ public partial class Form1 : Form
         value = value.Trim();
         switch (prop)
         {
-            // ===== Color & Background =====
             case "color": bs.Color = ParseCssColor(value); break;
             case "background-color": bs.BackgroundColor = ParseCssColorOrNull(value); break;
             case "background": ParseBackground(bs, value); break;
@@ -254,8 +268,6 @@ public partial class Form1 : Form
             case "background-clip": bs.BackgroundClip = value.ToLowerInvariant(); break;
             case "background-origin": bs.BackgroundOrigin = value.ToLowerInvariant(); break;
             case "background-attachment": bs.BackgroundAttachment = value.ToLowerInvariant(); break;
-
-            // ===== Font =====
             case "font-size": bs.FontSize = ParsePx(value, 12); break;
             case "font-weight": bs.Bold = value is "bold" or "700" or "800" or "900"; break;
             case "font-style": bs.Italic = value is "italic" or "oblique"; break;
@@ -268,8 +280,6 @@ public partial class Form1 : Form
             case "word-spacing": bs.WordSpacing = ParsePx(value); break;
             case "text-transform": bs.TextTransform = value.ToLowerInvariant(); break;
             case "text-indent": bs.TextIndent = ParsePx(value); break;
-
-            // ===== Text Decoration =====
             case "text-decoration":
                 bs.Underline = value.Contains("underline");
                 bs.LineThrough = value.Contains("line-through");
@@ -290,8 +300,6 @@ public partial class Form1 : Form
                 bs.Overline = value.Contains("overline");
                 break;
             case "text-decoration-thickness": bs.TextDecorationThickness = ParsePx(value); break;
-
-            // ===== Text Shadow =====
             case "text-shadow":
                 if (value.ToLowerInvariant() == "none") { bs.TextShadowBlur = 0; break; }
                 var ts = value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -302,8 +310,6 @@ public partial class Form1 : Form
                     if (ts[i].StartsWith('#') || ts[i].StartsWith("rgb") || NamedColors.ContainsKey(ts[i].ToLowerInvariant()))
                     { bs.TextShadowColor = ParseCssColor(ts[i]); break; }
                 break;
-
-            // ===== Text Layout =====
             case "white-space": bs.WhiteSpace = value.ToLowerInvariant(); break;
             case "text-align": bs.TextAlign = value.ToLowerInvariant(); break;
             case "vertical-align": bs.VerticalAlign = value.ToLowerInvariant(); break;
@@ -314,8 +320,6 @@ public partial class Form1 : Form
             case "text-overflow": bs.TextOverflow = value.ToLowerInvariant(); break;
             case "tab-size": bs.TabSize = ParsePx(value, 8); break;
             case "hyphens": bs.Hyphens = value.ToLowerInvariant(); break;
-
-            // ===== Display & Visibility =====
             case "display":
                 var d = value.ToLowerInvariant(); var db = d;
                 bs.DisplayNone = db == "none";
@@ -340,8 +344,6 @@ public partial class Form1 : Form
             case "overflow-y": bs.OverflowY = value.ToLowerInvariant(); break;
             case "pointer-events": bs.PointerEvents = value.ToLowerInvariant(); break;
             case "user-select": bs.UserSelect = value.ToLowerInvariant(); break;
-
-            // ===== Box Model =====
             case "width": bs.Width = ParsePx(value); bs.HasWidth = bs.Width > 0; break;
             case "height": bs.Height = ParsePx(value); bs.HasHeight = bs.Height > 0; break;
             case "min-width": bs.MinWidth = ParsePx(value); break;
@@ -359,8 +361,6 @@ public partial class Form1 : Form
             case "padding-bottom": bs.PaddingBottom = ParsePx(value); break;
             case "padding-left": bs.PaddingLeft = ParsePx(value); break;
             case "padding-right": bs.PaddingRight = ParsePx(value); break;
-
-            // ===== Border =====
             case "border": ParseBorder(bs, value); break;
             case "border-top": ParseBorderSide(bs, "top", value); break;
             case "border-bottom": ParseBorderSide(bs, "bottom", value); break;
@@ -386,8 +386,6 @@ public partial class Form1 : Form
             case "border-top-right-radius": SetCornerRadius(bs, "top-right", value); break;
             case "border-bottom-left-radius": SetCornerRadius(bs, "bottom-left", value); break;
             case "border-bottom-right-radius": SetCornerRadius(bs, "bottom-right", value); break;
-
-            // ===== Outline =====
             case "outline":
                 var oparts = value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
                 foreach (var o in oparts)
@@ -401,8 +399,6 @@ public partial class Form1 : Form
             case "outline-style": bs.OutlineStyle = value.ToLowerInvariant(); break;
             case "outline-color": bs.OutlineColor = ParseCssColor(value); break;
             case "outline-offset": bs.OutlineOffset = ParsePx(value); break;
-
-            // ===== Box Shadow =====
             case "box-shadow":
                 if (value.ToLowerInvariant() == "none") { bs.ShadowBlur = 0; break; }
                 var sh = value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -416,20 +412,14 @@ public partial class Form1 : Form
                     if (sh[i].StartsWith('#') || sh[i].StartsWith("rgb") || NamedColors.ContainsKey(sh[i].ToLowerInvariant().TrimEnd(',')))
                     { bs.ShadowColor = ParseCssColor(sh[i]); break; }
                 break;
-
-            // ===== Positioning =====
             case "position": bs.Position = value.ToLowerInvariant(); break;
             case "left": bs.PositionLeft = ParsePx(value); break;
             case "right": bs.PositionRight = ParsePx(value); break;
             case "top": bs.PositionTop = ParsePx(value); break;
             case "bottom": bs.PositionBottom = ParsePx(value); break;
             case "z-index": { int zi = 0; int.TryParse(value, out zi); bs.ZIndex = zi; } break;
-
-            // ===== Float / Clear =====
             case "float": bs.Float = value.ToLowerInvariant(); break;
             case "clear": bs.Clear = value.ToLowerInvariant(); break;
-
-            // ===== Flexbox =====
             case "flex-direction": bs.FlexDirection = value.ToLowerInvariant(); break;
             case "flex-wrap": bs.FlexWrap = value.ToLowerInvariant(); break;
             case "flex-flow": var ff = value.Split(' '); if (ff.Length > 0) bs.FlexDirection = ff[0].ToLowerInvariant(); if (ff.Length > 1) bs.FlexWrap = ff[1].ToLowerInvariant(); break;
@@ -447,22 +437,16 @@ public partial class Form1 : Form
             case "flex-basis": bs.FlexBasis = value.ToLowerInvariant(); break;
             case "align-self": bs.AlignSelf = value.ToLowerInvariant(); break;
             case "order": int.TryParse(value, out bs.Order); break;
-
-            // ===== Grid =====
             case "grid-template-columns": bs.GridTemplateColumns = value.ToLowerInvariant(); break;
             case "grid-template-rows": bs.GridTemplateRows = value.ToLowerInvariant(); break;
             case "grid-column": bs.GridColumn = value.ToLowerInvariant(); break;
             case "grid-row": bs.GridRow = value.ToLowerInvariant(); break;
             case "grid-gap": case "gap": bs.GridGap = value.ToLowerInvariant(); break;
-
-            // ===== Table =====
             case "border-collapse": bs.BorderCollapse = value.ToLowerInvariant(); break;
             case "border-spacing": bs.BorderSpacing = ParsePx(value); break;
             case "caption-side": bs.CaptionSide = value.ToLowerInvariant(); break;
             case "empty-cells": bs.EmptyCells = value.ToLowerInvariant(); break;
             case "table-layout": bs.TableLayout = value.ToLowerInvariant(); break;
-
-            // ===== List =====
             case "list-style-type": bs.ListStyleType = value.ToLowerInvariant(); break;
             case "list-style-position": bs.ListStylePosition = value.ToLowerInvariant(); break;
             case "list-style":
@@ -470,8 +454,6 @@ public partial class Form1 : Form
                 foreach (var l in lsp)
                 { var ll = l.ToLowerInvariant(); if (ll is "inside" or "outside") bs.ListStylePosition = ll; else if (ll is "disc" or "circle" or "square" or "decimal" or "none") bs.ListStyleType = ll; }
                 break;
-
-            // ===== Transform =====
             case "transform":
                 var tv = value.Trim().ToLowerInvariant();
                 if (tv.StartsWith("translate("))
@@ -494,8 +476,6 @@ public partial class Form1 : Form
                 if (toparts.Length > 0) { if (toparts[0] == "center") bs.TransformOriginX = 0.5f; else if (toparts[0] is "left" or "top") bs.TransformOriginX = 0; else if (toparts[0] is "right" or "bottom") bs.TransformOriginX = 1f; else bs.TransformOriginX = ParsePx(toparts[0]) / 100f; }
                 if (toparts.Length > 1) { if (toparts[1] == "center") bs.TransformOriginY = 0.5f; else if (toparts[1] is "left" or "top") bs.TransformOriginY = 0; else if (toparts[1] is "right" or "bottom") bs.TransformOriginY = 1f; else bs.TransformOriginY = ParsePx(toparts[1]) / 100f; }
                 break;
-
-            // ===== Filter & Effects =====
             case "filter":
                 if (value.ToLowerInvariant() == "none") { bs.Filter = "none"; bs.FilterBlur = 0; break; }
                 bs.Filter = value.ToLowerInvariant();
@@ -504,13 +484,9 @@ public partial class Form1 : Form
                 break;
             case "mix-blend-mode": bs.MixBlendMode = value.ToLowerInvariant(); break;
             case "backdrop-filter": bs.BackdropFilter = value.ToLowerInvariant(); break;
-
-            // ===== Image & Object =====
             case "object-fit": bs.ObjectFit = value.ToLowerInvariant(); break;
             case "object-position": bs.ObjectPosition = value; break;
             case "image-rendering": bs.ImageRendering = value.ToLowerInvariant(); break;
-
-            // ===== Cursor =====
             case "cursor": bs.Cursor = value.ToLowerInvariant(); break;
         }
     }
@@ -769,7 +745,6 @@ public partial class Form1 : Form
     {
         if (_doc == null) return;
 
-        // Save form state and focus before relayout
         SaveFormState();
         var oldFocusSource = _focusedInput?.Source;
 
@@ -780,7 +755,6 @@ public partial class Form1 : Form
         _domChanged = false;
         RestoreFormState();
 
-        // Restore focused input by matching Source element in new layout
         _focusedInput = oldFocusSource != null && _layout != null
             ? AllBoxesFlat(_layout).FirstOrDefault(b => b.IsInput && b.Source == oldFocusSource)
             : null;
@@ -839,7 +813,6 @@ public partial class Form1 : Form
                 _renderPanel.Invalidate();
                 break;
             case "radio":
-                // Uncheck all radio buttons with the same name
                 if (_layout != null)
                     UncheckRadioGroup(_layout, box.InputName);
                 box.InputChecked = true;
@@ -1235,6 +1208,14 @@ public partial class Form1 : Form
 #pragma warning restore CS8602
     }
 
+    private void RenderPanel_MouseWheel(object? sender, MouseEventArgs e)
+    {
+        if (_layout == null || _viewTabs.SelectedIndex != 0) return;
+        if (!_renderPanel.ClientRectangle.Contains(_renderPanel.PointToClient(Cursor.Position))) return;
+        _scrollY = Math.Max(0, Math.Min(_scrollY - e.Delta / 3, Math.Max(0, _layout.Bounds.Height - RenderHeight)));
+        if (_scrollBar.Visible) _scrollBar.Value = (int)_scrollY; _renderPanel.Invalidate();
+    }
+
     private LayoutBox CreateErrorLayout(string message)
     {
         var root = new LayoutBox { IsBlock = true, Bounds = new RectangleF(0, 0, RenderWidth, 0) };
@@ -1278,15 +1259,15 @@ public partial class Form1 : Form
         e.Graphics.DrawImage(gdiBmp, 0, 0);
     }
 
-    protected override void OnMouseWheel(MouseEventArgs e)
+    protected override void Dispose(bool disposing)
     {
-        base.OnMouseWheel(e); if (_layout == null || _tabs.SelectedIndex != 0) return;
-        var pt = _renderPanel.PointToClient(Cursor.Position); if (!_renderPanel.ClientRectangle.Contains(pt)) return;
-        _scrollY = Math.Max(0, Math.Min(_scrollY - e.Delta / 3, Math.Max(0, _layout.Bounds.Height - RenderHeight)));
-        if (_scrollBar.Visible) _scrollBar.Value = (int)_scrollY; _renderPanel.Invalidate();
+        if (disposing)
+        {
+            _jsEngine?.Dispose();
+            _jsEngine = null;
+        }
+        base.Dispose(disposing);
     }
-
-    protected override void OnFormClosed(FormClosedEventArgs e) { _jsEngine?.Dispose(); base.OnFormClosed(e); }
 }
 
 class DoubleBufferedPanel : Panel { public DoubleBufferedPanel() { DoubleBuffered = true; } }

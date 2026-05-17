@@ -1,7 +1,7 @@
-﻿#nullable enable
+#nullable enable
 namespace WebviewCore;
 
-partial class Form1
+partial class DownloadForm
 {
     private System.ComponentModel.IContainer? components = null;
 
@@ -15,14 +15,11 @@ partial class Form1
     private void InitializeComponent()
     {
         SuspendLayout();
-        // 
-        // Form1
-        // 
         AutoScaleDimensions = new SizeF(9F, 20F);
         AutoScaleMode = AutoScaleMode.Font;
-        ClientSize = new Size(900, 700);
-        Name = "Form1";
-        Text = "WebviewCore";
+        ClientSize = new Size(420, 160);
+        Name = "DownloadForm";
+        Text = "Download File";
         ResumeLayout(false);
     }
 }
