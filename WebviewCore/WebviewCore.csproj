@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net6.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <LangVersion>11.0</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AngleSharp" Version="0.17.0" />
+    <PackageReference Include="AngleSharp.Css" Version="0.17.0" />
+    <PackageReference Include="Microsoft.ClearScript" Version="7.5.1" />
+    <PackageReference Include="Microsoft.ClearScript.Core" Version="7.5.1" />
+    <PackageReference Include="Microsoft.ClearScript.V8" Version="7.5.1" />
+    <PackageReference Include="Microsoft.ClearScript.V8.Native.win-x64" Version="7.5.1" />
+    <PackageReference Include="ExCSS" Version="4.3.1" />
+    <PackageReference Include="SkiaSharp" Version="2.88.9" />
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="6.0.0" />
+  </ItemGroup>
+
+</Project>
